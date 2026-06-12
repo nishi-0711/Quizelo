@@ -207,19 +207,63 @@ async function generateQuiz({ sourceText, questionType, difficulty, count, topic
 
   const prompt = makePrompt({ sourceText, questionType: qt, difficulty: diff, count: n, topicTitles });
 
+  // Helper: call generateContent with a timeout so a hanging 503 never freezes the server
+  async function callWithTimeout(timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const r = await model.generateContent(prompt, { signal: controller.signal });
+      clearTimeout(timer);
+      return r;
+    } catch (e) {
+      clearTimeout(timer);
+      if (e.name === "AbortError" || e.message?.includes("aborted")) {
+        const te = new Error("Gemini API timed out after 45 seconds. The model may be overloaded — please try again.");
+        te.statusCode = 503;
+        te.isTimeout = true;
+        throw te;
+      }
+      throw e;
+    }
+  }
+
   let result, response, content;
   try {
-    result = await model.generateContent(prompt);
+    console.log(`[Quiz Gen] Calling generateContent on model: ${modelName} (attempt ${retryCount + 1})`);
+    result = await callWithTimeout(45000);
+    console.log(`[Quiz Gen] generateContent response received successfully.`);
     response = await result.response;
     content = response.text();
   } catch (err) {
-    console.error(`[Quiz Gen API Error - Attempt ${retryCount + 1}]`, err);
+    console.error(`[Quiz Gen API Error - Attempt ${retryCount + 1}]`, err.message);
+
+    // 429 = quota exceeded – retrying won't help, fail fast
+    if (err.status === 429 || err.message?.includes("429") || err.message?.includes("quota")) {
+      const e = new Error(
+        "Gemini API quota exceeded. Your free-tier daily limit has been reached. " +
+        "Please try again tomorrow or enable billing at https://ai.google.dev."
+      );
+      e.statusCode = 429;
+      throw e;
+    }
+
+    // 503 / timeout – retry up to 2 more times with backoff, then surface a friendly message
     if (retryCount < 2) {
-      const delay = (retryCount + 1) * 2000;
-      console.log(`[Quiz Gen] API failed with error. Retrying in ${delay}ms...`);
+      const delay = (retryCount + 1) * 3000;
+      console.log(`[Quiz Gen] Retrying in ${delay}ms...`);
       await sleep(delay);
       return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
     }
+
+    // Exhausted retries
+    if (err.statusCode === 503 || err.status === 503 || err.message?.includes("503") || err.isTimeout) {
+      const e = new Error(
+        "Gemini API is currently overloaded. Please wait a moment and try again."
+      );
+      e.statusCode = 503;
+      throw e;
+    }
+
     throw err;
   }
 
@@ -316,14 +360,23 @@ async function generateQuiz({ sourceText, questionType, difficulty, count, topic
     return { questions: validQuestions.slice(0, n) };
   } catch (err) {
     if (err.message?.includes("User location is not supported")) {
-        const e = new Error("Gemini API is not available in your region. Please use a VPN or OpenAI instead.");
-        e.statusCode = 403;
-        throw e;
+      const e = new Error("Gemini API is not available in your region.");
+      e.statusCode = 403;
+      throw e;
     }
-    // If it's already a custom error with status code, rethrow
+    // Pass through errors that already have a statusCode (our own typed errors)
     if (err.statusCode) throw err;
-    
-    // Otherwise wrap it
+
+    // 429 quota exceeded – also catch here if it slipped through
+    if (err.status === 429 || err.message?.includes("429") || err.message?.includes("quota")) {
+      const e = new Error(
+        "Gemini API quota exceeded. Your free-tier daily limit has been reached. " +
+        "Please try again tomorrow or enable billing at https://ai.google.dev."
+      );
+      e.statusCode = 429;
+      throw e;
+    }
+
     console.error(`[Quiz Gen Error]`, err);
     const e = new Error(err.message || "An unexpected error occurred during quiz generation.");
     e.statusCode = 500;
