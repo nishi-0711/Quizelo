@@ -1,6 +1,8 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { z } = require("zod");
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const QuestionType = z.enum(["mcq", "true_false", "fill_blank", "short_answer", "mixed"]);
 const Difficulty = z.enum(["easy", "medium", "hard", "mixed"]);
 
@@ -205,23 +207,41 @@ async function generateQuiz({ sourceText, questionType, difficulty, count, topic
 
   const prompt = makePrompt({ sourceText, questionType: qt, difficulty: diff, count: n, topicTitles });
 
+  let result, response, content;
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const content = response.text();
+    result = await model.generateContent(prompt);
+    response = await result.response;
+    content = response.text();
+  } catch (err) {
+    console.error(`[Quiz Gen API Error - Attempt ${retryCount + 1}]`, err);
+    if (retryCount < 2) {
+      const delay = (retryCount + 1) * 2000;
+      console.log(`[Quiz Gen] API failed with error. Retrying in ${delay}ms...`);
+      await sleep(delay);
+      return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
+    }
+    throw err;
+  }
 
+  try {
     let parsed;
     try {
       parsed = JSON.parse(content);
     } catch {
-      if (retryCount < 1) return generateQuiz({ sourceText, questionType, difficulty, count }, retryCount + 1);
+      if (retryCount < 2) {
+        console.warn(`[Quiz Gen] JSON parsing failed. Retrying...`);
+        return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
+      }
       const err = new Error("AI returned non-JSON output");
       err.statusCode = 502;
       throw err;
     }
 
     if (!parsed.questions || !Array.isArray(parsed.questions)) {
-       if (retryCount < 1) return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
+       if (retryCount < 2) {
+         console.warn(`[Quiz Gen] Missing questions array. Retrying...`);
+         return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
+       }
        const err = new Error("AI returned invalid structure (missing questions array)");
        err.statusCode = 502;
        throw err;
@@ -279,7 +299,7 @@ async function generateQuiz({ sourceText, questionType, difficulty, count, topic
     }
 
     // If we don't have enough and haven't retried yet, try one more time
-    if (validQuestions.length < n && retryCount < 1) {
+    if (validQuestions.length < n && retryCount < 2) {
       console.warn(`[Quiz Gen] Retry triggered. Only got ${validQuestions.length}/${n} valid questions.`);
       return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
     }
