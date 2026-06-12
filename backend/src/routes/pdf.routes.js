@@ -48,6 +48,7 @@ router.post("/extract", upload.single("file"), async (req, res, next) => {
       scannedLikely: result.scannedLikely,
       text: result.text,
       perPage: result.perPage,
+      topics: result.topics || [],
     });
   } catch (err) {
     return next(err);

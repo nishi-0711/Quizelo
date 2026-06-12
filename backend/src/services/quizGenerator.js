@@ -97,14 +97,18 @@ function buildDifficultyRules(difficulty, count) {
   return `Use a mixed difficulty distribution close to: easy=${easy}, medium=${med}, hard=${hard} (sum=${count}).`;
 }
 
-function makePrompt({ sourceText, questionType, difficulty, count }) {
+function makePrompt({ sourceText, questionType, difficulty, count, topicTitles }) {
   const trimmed = sourceText.trim();
   const clipped = trimmed.length > 100000 ? trimmed.slice(0, 100000) : trimmed; 
+
+  const scopeBlock = topicTitles && topicTitles.length > 0
+    ? `SCOPE RESTRICTION:\nGenerate questions ONLY from the following topic(s):\n${topicTitles.map((t, i) => `  ${i + 1}. ${t}`).join("\n")}\nDo NOT use any information outside these topic areas.\n`
+    : "";
 
   return `
 You are a quiz generator. Your task is to generate a high-quality quiz based ONLY on the provided source text.
 
-SOURCE TEXT:
+${scopeBlock}SOURCE TEXT:
 """
 ${clipped}
 """
@@ -171,7 +175,7 @@ function fuzzyMatchEvidence(sourceText, evidence) {
   return null;
 }
 
-async function generateQuiz({ sourceText, questionType, difficulty, count }, retryCount = 0) {
+async function generateQuiz({ sourceText, questionType, difficulty, count, topicTitles = [] }, retryCount = 0) {
   if (typeof sourceText !== "string" || sourceText.trim().length < 50) {
     const err = new Error("sourceText must be at least 50 characters of extracted PDF text");
     err.statusCode = 400;
@@ -199,7 +203,7 @@ async function generateQuiz({ sourceText, questionType, difficulty, count }, ret
     }
   });
 
-  const prompt = makePrompt({ sourceText, questionType: qt, difficulty: diff, count: n });
+  const prompt = makePrompt({ sourceText, questionType: qt, difficulty: diff, count: n, topicTitles });
 
   try {
     const result = await model.generateContent(prompt);
@@ -217,7 +221,7 @@ async function generateQuiz({ sourceText, questionType, difficulty, count }, ret
     }
 
     if (!parsed.questions || !Array.isArray(parsed.questions)) {
-       if (retryCount < 1) return generateQuiz({ sourceText, questionType, difficulty, count }, retryCount + 1);
+       if (retryCount < 1) return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
        const err = new Error("AI returned invalid structure (missing questions array)");
        err.statusCode = 502;
        throw err;
@@ -277,7 +281,7 @@ async function generateQuiz({ sourceText, questionType, difficulty, count }, ret
     // If we don't have enough and haven't retried yet, try one more time
     if (validQuestions.length < n && retryCount < 1) {
       console.warn(`[Quiz Gen] Retry triggered. Only got ${validQuestions.length}/${n} valid questions.`);
-      return generateQuiz({ sourceText, questionType, difficulty, count }, retryCount + 1);
+      return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
     }
 
     // Ensure we have at least SOME questions

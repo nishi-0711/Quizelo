@@ -14,13 +14,27 @@ router.post("/generate", async (req, res, next) => {
       throw err;
     }
 
-    const { sourceText, questionType, difficulty, count } = req.body || {};
+    const { sourceText, questionType, difficulty, count, selectedTopics } = req.body || {};
+
+    // If the client sent specific topic chunks, merge their content into the source text.
+    // Otherwise fall back to the full sourceText as before.
+    let effectiveSource = sourceText;
+    let topicTitles = [];
+
+    if (Array.isArray(selectedTopics) && selectedTopics.length > 0) {
+      topicTitles = selectedTopics.map((t) => t.title).filter(Boolean);
+      effectiveSource = selectedTopics.map((t) => t.content).filter(Boolean).join("\n\n");
+      if (!effectiveSource || effectiveSource.trim().length < 50) {
+        return res.status(400).json({ error: "Selected topics contain too little text. Please select more topics." });
+      }
+    }
 
     const quiz = await generateQuiz({
-      sourceText,
+      sourceText: effectiveSource,
       questionType,
       difficulty,
       count,
+      topicTitles,
     });
 
     return res.json(quiz);

@@ -139,6 +139,8 @@ export default function Home() {
   const [error, setError] = useState("");
   
   const [extractedText, setExtractedText] = useState("");
+  const [topics, setTopics] = useState([]); // detected topic chunks
+  const [selectedTopicIds, setSelectedTopicIds] = useState(new Set()); // which topics are checked
   const [quizQuestions, setQuizQuestions] = useState([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(-1); // -1: Config, >=0: Play
   const [userAnswers, setUserAnswers] = useState({});
@@ -152,6 +154,11 @@ export default function Home() {
   const [count, setCount] = useState("5");
   const [customCount, setCustomCount] = useState("");
 
+  // Topic helpers
+  const showTopicSelector = topics.length > 1; // hide when only full-doc fallback
+  const selectedTopics = topics.filter((t) => selectedTopicIds.has(t.id));
+  const selectedCharCount = selectedTopics.reduce((s, t) => s + t.content.length, 0);
+
   const handleFileChange = async (f) => {
     if (f && f.type === "application/pdf") {
       setFile(f);
@@ -161,6 +168,10 @@ export default function Home() {
         const res = await api.extractPdf(f);
         if (res.text) {
           setExtractedText(res.text);
+          const detected = res.topics && res.topics.length > 0 ? res.topics : [];
+          setTopics(detected);
+          // Auto-select all topics
+          setSelectedTopicIds(new Set(detected.map((t) => t.id)));
         } else {
           setError("No extractable text found in this PDF.");
           setFile(null);
@@ -176,6 +187,18 @@ export default function Home() {
     }
   };
 
+  const toggleTopic = (id) => {
+    setSelectedTopicIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllTopics = () => setSelectedTopicIds(new Set(topics.map((t) => t.id)));
+  const clearAllTopics = () => setSelectedTopicIds(new Set());
+
   const handleGenerate = async () => {
     if (!extractedText) return;
     
@@ -189,11 +212,16 @@ export default function Home() {
         return;
       }
 
+      // If topics are available and user has selected specific ones, send them.
+      // Otherwise fall back to full text.
+      const topicsPayload = showTopicSelector && selectedTopics.length > 0 ? selectedTopics : null;
+
       const res = await api.generateQuiz({
         sourceText: extractedText,
         questionType,
         difficulty,
-        count: finalCount
+        count: finalCount,
+        ...(topicsPayload ? { selectedTopics: topicsPayload } : {}),
       });
       
       if (res.questions && res.questions.length > 0) {
@@ -273,6 +301,8 @@ export default function Home() {
   const resetQuiz = () => {
     setFile(null);
     setExtractedText("");
+    setTopics([]);
+    setSelectedTopicIds(new Set());
     setQuizQuestions([]);
     setCurrentQuestionIndex(-1);
     setUserAnswers({});
@@ -415,10 +445,89 @@ export default function Home() {
           <input ref={inputRef} type="file" accept="application/pdf" className="hidden" onChange={(e) => handleFileChange(e.target.files?.[0])} />
         </Card>
 
+        {/* Topic Selector Section — only shown when multiple topics detected */}
+        {showTopicSelector && (
+          <Card className="p-8 border-slate-200 dark:border-slate-800 shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-bold">2</div>
+              <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">Select Topics</h2>
+            </div>
+
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={selectAllTopics}
+                className="px-3 py-1.5 text-[11px] font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+              >
+                Select All
+              </button>
+              <button
+                onClick={clearAllTopics}
+                className="px-3 py-1.5 text-[11px] font-bold rounded-lg border-2 border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300 dark:hover:border-slate-600 transition-colors"
+              >
+                Clear
+              </button>
+              <span className="ml-auto text-[11px] text-slate-400 font-medium self-center">
+                {selectedTopicIds.size} of {topics.length} selected
+                {selectedCharCount > 0 && (
+                  <span className="ml-1 text-slate-300">· ~{Math.round(selectedCharCount / 5)} words</span>
+                )}
+              </span>
+            </div>
+
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {topics.map((topic) => {
+                const checked = selectedTopicIds.has(topic.id);
+                return (
+                  <label
+                    key={topic.id}
+                    className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                      checked
+                        ? "border-indigo-500 bg-indigo-50/60 dark:bg-indigo-900/20 dark:border-indigo-600"
+                        : "border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700"
+                    }`}
+                  >
+                    <div className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                      checked ? "bg-indigo-600 border-indigo-600" : "border-slate-300 dark:border-slate-600"
+                    }`}>
+                      {checked && (
+                        <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 10">
+                          <path d="M1.5 5l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </div>
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      checked={checked}
+                      onChange={() => toggleTopic(topic.id)}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-sm font-semibold truncate ${
+                        checked ? "text-indigo-700 dark:text-indigo-300" : "text-slate-700 dark:text-slate-300"
+                      }`}>
+                        {topic.title}
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        ~{Math.round(topic.content.length / 5)} words
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+
+            {selectedTopicIds.size === 0 && (
+              <p className="mt-3 text-xs text-amber-600 dark:text-amber-400 font-medium">⚠️ Select at least one topic to generate questions.</p>
+            )}
+          </Card>
+        )}
+
         {/* Quiz Options Section */}
         <Card className="p-8 border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="flex items-center gap-3 mb-8">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-bold">2</div>
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-bold">
+              {showTopicSelector ? "3" : "2"}
+            </div>
             <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">Customize Quiz</h2>
           </div>
           
@@ -494,7 +603,7 @@ export default function Home() {
           <Button
             size="lg"
             className="w-full max-w-sm py-5 text-sm font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-200 dark:shadow-none hover:translate-y-[-2px] transition-all disabled:opacity-50"
-            disabled={!extractedText || loading}
+            disabled={!extractedText || loading || (showTopicSelector && selectedTopicIds.size === 0)}
             onClick={handleGenerate}
           >
             {loading ? "Generating..." : "Generate Quiz"}

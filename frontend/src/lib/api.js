@@ -63,8 +63,8 @@ export const api = {
     return request("/pdf/extract", { method: "POST", body: fd });
   },
 
-  generateQuiz: ({ sourceText, questionType, difficulty, count }) =>
-    request("/quiz/generate", { method: "POST", body: { sourceText, questionType, difficulty, count } }),
+  generateQuiz: ({ sourceText, questionType, difficulty, count, selectedTopics }) =>
+    request("/quiz/generate", { method: "POST", body: { sourceText, questionType, difficulty, count, selectedTopics } }),
 
   createSession: ({ questions, timeLimitSec }) =>
     request("/gameplay/sessions", { method: "POST", body: { questions, timeLimitSec } }),
