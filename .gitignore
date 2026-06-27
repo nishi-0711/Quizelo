@@ -22,7 +22,16 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Quizzes (generated PDFs stored per user)
+*.pdf
+
+# Profile avatars
+*.png
+
 # Scratch / temp files
 backend/scratch_*.js
 commit_log.md
 generate_commits.js
+
+# Freebuff desktop tooling (preview servers, run docs, logs)
+.freebuff/
