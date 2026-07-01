@@ -8,7 +8,8 @@ const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 15 * 1024 * 1024, // 15MB
+    fileSize: 15 * 1024 * 1024, // 15MB per file
+    files: 10,
   },
   fileFilter: (req, file, cb) => {
     const ok =
@@ -19,41 +20,64 @@ const upload = multer({
   },
 });
 
-// Upload PDF and extract usable text for quiz generation.
-// multipart/form-data field: "file"
-router.post("/extract", upload.single("file"), async (req, res, next) => {
+/**
+ * Namespace a document's topics/chunks so multiple PDFs can coexist:
+ * - topicId / chunkId become globally unique across documents (doc_0_topic_1 ...)
+ * - every chunk carries pdfName + docId so citations preserve document identity
+ */
+function namespaceDocument(result, index, pdfName) {
+  const docId = `doc_${index}`;
+  const topics = (result.topics || []).map((t, i) => ({
+    ...t,
+    id: `${docId}_topic_${i + 1}`,
+    pdfName,
+  }));
+  const chunks = (result.chunks || []).map((c, i) => ({
+    ...c,
+    chunkId: `${docId}_chunk_${i + 1}`,
+    pdfName,
+    docId,
+  }));
+  return { ...result, pdfName, docId, topics, chunks };
+}
+
+// Upload one or more PDFs and extract usable text for quiz/notes/flashcard generation.
+// multipart/form-data field: "files" (one or more)
+// Returns { documents: [ { pdfName, docId, pages, perPage, text, topics, chunks, scannedLikely } ] }
+router.post("/extract", upload.array("files", 10), async (req, res, next) => {
   try {
-    if (!req.file?.buffer) return res.status(400).json({ error: "PDF file is required (field: file)" });
+    const files = req.files || [];
+    if (files.length === 0) {
+      return res.status(400).json({ error: "At least one PDF file is required (field: files)" });
+    }
 
-    const result = await extractPdfTextFromBuffer(req.file.buffer);
+    const documents = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const result = await extractPdfTextFromBuffer(file.buffer);
 
-    if (!result.text) {
-      if (result.scannedLikely) {
+      if (!result.text) {
+        if (result.scannedLikely) {
+          return res.status(422).json({
+            error: `Scanned PDF detected in "${file.originalname}". OCR is required to extract text.`,
+            scannedLikely: true,
+            pdfName: file.originalname,
+          });
+        }
         return res.status(422).json({
-          error: "Scanned PDF detected. OCR is required to extract text.",
-          scannedLikely: true,
-          pages: result.pages,
+          error: `No extractable text found in "${file.originalname}".`,
+          scannedLikely: false,
+          pdfName: file.originalname,
         });
       }
 
-      return res.status(422).json({
-        error: "No extractable text found in PDF.",
-        scannedLikely: false,
-        pages: result.pages,
-      });
+      documents.push(namespaceDocument(result, i, file.originalname));
     }
 
-    return res.json({
-      pages: result.pages,
-      scannedLikely: result.scannedLikely,
-      text: result.text,
-      perPage: result.perPage,
-      topics: result.topics || [],
-    });
+    return res.json({ documents });
   } catch (err) {
     return next(err);
   }
 });
 
 module.exports = router;
-
