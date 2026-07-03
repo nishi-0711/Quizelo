@@ -35,7 +35,7 @@ function sessionSummary(session) {
 // Body: { questions: [...], timeLimitSec?: number, lives?: number }
 router.post("/sessions", requireAuth, async (req, res, next) => {
   try {
-    const { questions, timeLimitSec, lives } = req.body || {};
+    const { questions, timeLimitSec, lives, title, sourcePdfs, difficulty } = req.body || {};
     if (!Array.isArray(questions) || questions.length < 1) {
       return res.status(400).json({ error: "questions array is required" });
     }
@@ -61,6 +61,7 @@ router.post("/sessions", requireAuth, async (req, res, next) => {
       answer: q.answer,
       explanation: q.explanation,
       evidence: q.evidence,
+      marks: Number.isFinite(Number(q.marks)) && Number(q.marks) >= 0 ? Number(q.marks) : 1,
     }));
 
     const session = await QuizSession.create({
@@ -68,6 +69,9 @@ router.post("/sessions", requireAuth, async (req, res, next) => {
       questions: normalized,
       timeLimitSec: tl,
       lives: lv,
+      title: typeof title === "string" ? title.slice(0, 200) : "",
+      sourcePdfs: Array.isArray(sourcePdfs) ? sourcePdfs.map((s) => String(s).slice(0, 200)) : [],
+      difficulty: typeof difficulty === "string" ? difficulty.slice(0, 20) : "mixed",
       currentIndex: 0,
       status: "in_progress",
       startedAt: new Date(),

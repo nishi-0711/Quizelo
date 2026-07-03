@@ -11,6 +11,11 @@ const quizResultSchema = new mongoose.Schema(
     timeLimitSec: { type: Number, default: null },
     durationSec: { type: Number, required: true },
 
+    // Display metadata copied from the session
+    title: { type: String, default: "" },
+    sourcePdfs: { type: [String], default: [] },
+    difficulty: { type: String, default: "mixed" },
+
     totalQuestions: { type: Number, required: true },
     answeredCount: { type: Number, required: true },
     gradableCount: { type: Number, required: true },

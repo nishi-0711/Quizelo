@@ -5,19 +5,29 @@ function computeScore(session) {
   const totalQuestions = session.questions.length;
   const answeredCount = session.responses.length;
 
+  // Marks-weighted scoring: every question contributes its marks (default 1,
+  // so generated quizzes score identically to before).
   let gradableCount = 0;
   let correctCount = 0;
+  let gradableMarks = 0;
+  let correctMarks = 0;
 
   for (const r of session.responses) {
     const q = session.questions[r.index];
     if (!q) continue;
     // short_answer is not reliably auto-gradable => exclude from scoring
     if (q.type === "short_answer") continue;
+    const marks = Number.isFinite(Number(q.marks)) && Number(q.marks) > 0 ? Number(q.marks) : 1;
     gradableCount += 1;
-    if (r.isCorrect === true) correctCount += 1;
+    gradableMarks += marks;
+    if (r.isCorrect === true) {
+      correctCount += 1;
+      correctMarks += marks;
+    }
   }
 
-  const scorePercent = gradableCount > 0 ? Math.round((correctCount / gradableCount) * 100) : 0;
+  const scorePercent =
+    gradableMarks > 0 ? Math.round((correctMarks / gradableMarks) * 100) : gradableCount > 0 ? Math.round((correctCount / gradableCount) * 100) : 0;
 
   return { totalQuestions, answeredCount, gradableCount, correctCount, scorePercent };
 }
@@ -88,6 +98,9 @@ async function upsertResultFromSession(session) {
     finishedAt: session.finishedAt,
     timeLimitSec: session.timeLimitSec,
     durationSec,
+    title: session.title || "",
+    sourcePdfs: session.sourcePdfs || [],
+    difficulty: session.difficulty || "mixed",
     ...scoring,
     xpEarned,
     questions: session.questions,
