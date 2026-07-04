@@ -13,7 +13,7 @@ router.get("/", requireAuth, async (req, res, next) => {
     const results = await QuizResult.find({ userId: req.auth.userId })
       .sort({ finishedAt: -1 })
       .limit(50)
-      .select("sessionId status finishedAt scorePercent totalQuestions answeredCount xpEarned durationSec");
+      .select("sessionId status finishedAt scorePercent totalQuestions answeredCount xpEarned durationSec title sourcePdfs difficulty");
 
     return res.json({ results });
   } catch (err) {
