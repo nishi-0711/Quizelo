@@ -6,41 +6,61 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const QuestionType = z.enum(["mcq", "true_false", "fill_blank", "short_answer", "mixed"]);
 const Difficulty = z.enum(["easy", "medium", "hard", "mixed"]);
 
+const SourceSchema = z.object({
+  page: z.number().int().min(1),
+  section: z.string().min(1),
+  chunkId: z.string().min(1),
+  topic: z.string().optional(),
+  pdfName: z.string().optional(),
+  startLine: z.number().int().optional(),
+  endLine: z.number().int().optional(),
+});
+
+const BloomLevel = z.enum(["remember", "understand", "apply", "analyze", "evaluate", "create"]).optional();
+
 const McqSchema = z.object({
   type: z.literal("mcq"),
   difficulty: z.enum(["easy", "medium", "hard"]),
+  bloom: BloomLevel,
   question: z.string().min(5),
   options: z.array(z.string().min(1)).length(4),
   answerIndex: z.number().int().min(0).max(3),
   explanation: z.string().min(1),
   evidence: z.string().min(1),
+  source: SourceSchema,
 });
 
 const TfSchema = z.object({
   type: z.literal("true_false"),
   difficulty: z.enum(["easy", "medium", "hard"]),
+  bloom: BloomLevel,
   question: z.string().min(5),
   answer: z.boolean(),
   explanation: z.string().min(1),
   evidence: z.string().min(1),
+  source: SourceSchema,
 });
 
 const FillBlankSchema = z.object({
   type: z.literal("fill_blank"),
   difficulty: z.enum(["easy", "medium", "hard"]),
+  bloom: BloomLevel,
   question: z.string().min(5), // should contain "____"
   answer: z.string().min(1),
   explanation: z.string().min(1),
   evidence: z.string().min(1),
+  source: SourceSchema,
 });
 
 const ShortAnswerSchema = z.object({
   type: z.literal("short_answer"),
   difficulty: z.enum(["easy", "medium", "hard"]),
+  bloom: BloomLevel,
   question: z.string().min(5),
   answer: z.string().min(1),
   explanation: z.string().min(1),
   evidence: z.string().min(1),
+  source: SourceSchema,
 });
 
 const QuestionSchema = z.discriminatedUnion("type", [
@@ -99,18 +119,46 @@ function buildDifficultyRules(difficulty, count) {
   return `Use a mixed difficulty distribution close to: easy=${easy}, medium=${med}, hard=${hard} (sum=${count}).`;
 }
 
-function makePrompt({ sourceText, questionType, difficulty, count, topicTitles }) {
+function makePrompt({ sourceText, questionType, difficulty, count, topicTitles, topicsWithCounts, chunks }) {
   const trimmed = sourceText.trim();
   const clipped = trimmed.length > 100000 ? trimmed.slice(0, 100000) : trimmed; 
 
-  const scopeBlock = topicTitles && topicTitles.length > 0
-    ? `SCOPE RESTRICTION:\nGenerate questions ONLY from the following topic(s):\n${topicTitles.map((t, i) => `  ${i + 1}. ${t}`).join("\n")}\nDo NOT use any information outside these topic areas.\n`
-    : "";
+  let scopeBlock = "";
+  if (topicsWithCounts && topicsWithCounts.length > 0) {
+    // Weighted mode: explicit per-topic counts
+    const totalTargeted = topicsWithCounts.reduce((s, t) => s + t.targetCount, 0);
+    scopeBlock =
+      `SCOPE RESTRICTION:\n` +
+      `Generate questions distributed across the following topics with EXACT question counts:\n` +
+      topicsWithCounts.map((t, i) => `  ${i + 1}. "${t.title}" → generate EXACTLY ${t.targetCount} question(s)`).join("\n") +
+      `\nTotal MUST be EXACTLY ${totalTargeted} questions.` +
+      `\nDo NOT use any information outside these topic areas.\n`;
+  } else if (topicTitles && topicTitles.length > 0) {
+    // Standard mode: restrict to listed topics, LLM distributes freely
+    scopeBlock =
+      `SCOPE RESTRICTION:\n` +
+      `Generate questions ONLY from the following topic(s):\n` +
+      topicTitles.map((t, i) => `  ${i + 1}. ${t}`).join("\n") +
+      `\nDo NOT use any information outside these topic areas.\n`;
+  }
+
+  let chunksBlock = "";
+  if (Array.isArray(chunks) && chunks.length > 0) {
+    chunksBlock = 
+      `CHUNKS FOR REFERENCE:\n` +
+      `The source text is divided into the following numbered paragraph chunks, possibly from multiple documents. For each question you generate, you MUST cite the exact chunkId, pdfName, page, section, startLine, and endLine from this list.\n\n` +
+      chunks.map(c => {
+        const docInfo = c.pdfName ? `, pdfName: "${c.pdfName}"` : ``;
+        const lineInfo = (c.startLine && c.endLine) ? `, startLine: ${c.startLine}, endLine: ${c.endLine}` : ``;
+        return `[chunkId: "${c.chunkId}"${docInfo}, page: ${c.page}, section: "${c.section}"${lineInfo}]\nText: "${c.text}"`;
+      }).join("\n\n") +
+      `\n\n`;
+  }
 
   return `
 You are a quiz generator. Your task is to generate a high-quality quiz based ONLY on the provided source text.
 
-${scopeBlock}SOURCE TEXT:
+${chunksBlock}${scopeBlock}SOURCE TEXT:
 """
 ${clipped}
 """
@@ -128,6 +176,14 @@ Every object in the array MUST have these fields:
 3. "question": (string) The text of the question. For "fill_blank", include "____".
 4. "explanation": (string) A brief explanation of the correct answer.
 5. "evidence": (string) A DIRECT, VERBATIM quote from the SOURCE TEXT that proves the answer.
+6. "source": (object) The citation structure referencing a chunk from the CHUNKS FOR REFERENCE list. This object MUST contain:
+    - "page": (number) The page number of the cited chunk.
+    - "section": (string) The section/topic name of the cited chunk.
+    - "chunkId": (string) The chunkId of the cited chunk (e.g. "doc_0_chunk_1").
+    - "topic": (string) Same as the section name of the cited chunk.
+    - "pdfName": (string) The pdfName of the cited chunk (copy exactly from the chunk metadata above).
+    - "startLine": (number) The startLine of the cited chunk (copy exactly from the chunk metadata above).
+    - "endLine": (number) The endLine of the cited chunk (copy exactly from the chunk metadata above).
 
 TYPE-SPECIFIC FIELDS:
 - For "mcq":
@@ -140,6 +196,11 @@ TYPE-SPECIFIC FIELDS:
 - For "short_answer":
     - "answer": (string) A concise correct answer.
 
+ADDITIONAL FIELD (all question types):
+7. "bloom": (string) Bloom's Taxonomy cognitive level. Must be one of:
+   "remember" (recall facts), "understand" (explain concepts), "apply" (use knowledge),
+   "analyze" (break down structure), "evaluate" (judge/critique), "create" (design/produce).
+
 STRICT RULES:
 - NO duplicate questions.
 - NO outside knowledge.
@@ -150,34 +211,59 @@ STRICT RULES:
 function fuzzyMatchEvidence(sourceText, evidence) {
   if (!evidence || typeof evidence !== "string") return null;
   
+  // Clean quotes and spaces from the evidence quote
+  let cleanEvidence = evidence.trim()
+    .replace(/^["'“”‘’'«»]+|["'“”‘’'«»]+$/g, "") // strip leading/trailing quotes
+    .trim();
+
+  if (!cleanEvidence) return null;
+
   // 1. Try exact match
-  if (sourceText.includes(evidence)) return evidence;
+  if (sourceText.includes(cleanEvidence)) return cleanEvidence;
 
-  // 2. Try trimmed match
-  const trimmed = evidence.trim();
-  if (sourceText.includes(trimmed)) return trimmed;
+  // 2. Try matching after converting all whitespaces (spaces, tabs, newlines) to a single space
+  const normalize = (s) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+  const normSource = normalize(sourceText);
+  const normEvidence = normalize(cleanEvidence);
 
-  // 3. Try ignoring extra whitespace/newlines and case
-  const normalize = (s) => s.replace(/\s+/g, ' ').trim();
-  const normalizedEvidence = normalize(evidence);
-  if (!normalizedEvidence) return null;
+  if (normSource.includes(normEvidence)) {
+    const escapedWords = normEvidence
+      .split(' ')
+      .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .filter(Boolean);
+    
+    if (escapedWords.length > 0) {
+      const regexStr = escapedWords.join('\\s+');
+      try {
+        const regex = new RegExp(regexStr, 'i');
+        const match = sourceText.match(regex);
+        if (match) return match[0];
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
 
-  const regexSource = normalizedEvidence
-    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // escape regex
-    .replace(/\s+/g, '\\s+');
-  
-  try {
-    const regex = new RegExp(regexSource, 'i');
-    const match = sourceText.match(regex);
-    if (match) return match[0];
-  } catch (e) {
-    // Ignore regex errors
+  // 3. Fallback: Try matching a significant consecutive subset of words (first 70% of words)
+  const words = cleanEvidence.split(/\s+/);
+  if (words.length > 6) {
+    const subWords = words.slice(0, Math.ceil(words.length * 0.7));
+    const subRegexStr = subWords
+      .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('\\s+');
+    try {
+      const regex = new RegExp(subRegexStr, 'i');
+      const match = sourceText.match(regex);
+      if (match) return match[0];
+    } catch (e) {
+      // ignore
+    }
   }
 
   return null;
 }
 
-async function generateQuiz({ sourceText, questionType, difficulty, count, topicTitles = [] }, retryCount = 0) {
+async function generateQuiz({ sourceText, questionType, difficulty, count, topicTitles = [], topicsWithCounts = null, chunks = [] }, retryCount = 0) {
   if (typeof sourceText !== "string" || sourceText.trim().length < 50) {
     const err = new Error("sourceText must be at least 50 characters of extracted PDF text");
     err.statusCode = 400;
@@ -195,17 +281,32 @@ async function generateQuiz({ sourceText, questionType, difficulty, count, topic
   }
 
   const apiKey = requireEnv("GEMINI_API_KEY");
-  const modelName = process.env.GEMINI_MODEL || "gemini-flash-latest";
-  
+
+  // ── Model fallback chain ────────────────────────────────────────────────────
+  // When the primary model is overloaded, automatically step down to a lighter
+  // model so the user still gets a result without waiting.
+  const MODEL_CHAIN = [
+    process.env.GEMINI_MODEL || "gemini-3.5-flash",
+    "gemini-flash-latest",
+    "gemini-3.5-flash-lite",
+    "gemini-flash-lite-latest",
+  ];
+  // Deduplicate while preserving order
+  const uniqueChain = [...new Set(MODEL_CHAIN)];
+  // Pick the model based on how many retries have already failed
+  const MAX_RETRIES = 4; // 5 total attempts
+  const modelIndex = Math.min(Math.floor(retryCount / 2), uniqueChain.length - 1);
+  const modelName = uniqueChain[modelIndex];
+
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ 
+  const model = genAI.getGenerativeModel({
     model: modelName,
     generationConfig: {
       responseMimeType: "application/json",
-    }
+    },
   });
 
-  const prompt = makePrompt({ sourceText, questionType: qt, difficulty: diff, count: n, topicTitles });
+  const prompt = makePrompt({ sourceText, questionType: qt, difficulty: diff, count: n, topicTitles, topicsWithCounts, chunks });
 
   // Helper: call generateContent with a timeout so a hanging 503 never freezes the server
   async function callWithTimeout(timeoutMs) {
@@ -229,41 +330,43 @@ async function generateQuiz({ sourceText, questionType, difficulty, count, topic
 
   let result, response, content;
   try {
-    console.log(`[Quiz Gen] Calling generateContent on model: ${modelName} (attempt ${retryCount + 1})`);
+    console.log(`[Quiz Gen] Attempt ${retryCount + 1}/${MAX_RETRIES + 1} using model: ${modelName}`);
     result = await callWithTimeout(45000);
-    console.log(`[Quiz Gen] generateContent response received successfully.`);
+    console.log(`[Quiz Gen] Response received successfully from ${modelName}.`);
     response = await result.response;
     content = response.text();
   } catch (err) {
-    console.error(`[Quiz Gen API Error - Attempt ${retryCount + 1}]`, err.message);
+    // Log the full raw error so the real cause is always visible in server logs
+    console.error(`[Quiz Gen API Error - Attempt ${retryCount + 1}] model=${modelName}`, {
+      message:      err.message,
+      status:       err.status,
+      statusText:   err.statusText,
+      errorDetails: err.errorDetails ?? null,
+      stack:        err.stack,
+    });
 
-    // 429 = quota exceeded – retrying won't help, fail fast
-    if (err.status === 429 || err.message?.includes("429") || err.message?.includes("quota")) {
-      const e = new Error(
-        "Gemini API quota exceeded. Your free-tier daily limit has been reached. " +
-        "Please try again tomorrow or enable billing at https://ai.google.dev."
-      );
+    // 429 — rate-limited or quota hit. Forward the real SDK message; don't invent one.
+    if (err.status === 429) {
+      const e = new Error(err.message || "Gemini API returned 429 (rate limit / quota).");
       e.statusCode = 429;
       throw e;
     }
 
-    // 503 / timeout – retry up to 2 more times with backoff, then surface a friendly message
-    if (retryCount < 2) {
-      const delay = (retryCount + 1) * 3000;
-      console.log(`[Quiz Gen] Retrying in ${delay}ms...`);
+    // 503 / timeout — retry with exponential backoff + jitter
+    if (retryCount < MAX_RETRIES) {
+      // Exponential backoff: 2s, 4s, 8s, 16s  +  up to 1s of random jitter
+      const baseDelay = Math.min(2000 * Math.pow(2, retryCount), 16000);
+      const jitter = Math.floor(Math.random() * 1000);
+      const delay = baseDelay + jitter;
+      const nextModel = uniqueChain[Math.min(Math.floor((retryCount + 1) / 2), uniqueChain.length - 1)];
+      const modelMsg = nextModel !== modelName ? ` (switching to ${nextModel})` : "";
+      console.log(`[Quiz Gen] Retrying in ${delay}ms${modelMsg}...`);
       await sleep(delay);
-      return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
+      return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles, topicsWithCounts, chunks }, retryCount + 1);
     }
 
-    // Exhausted retries
-    if (err.statusCode === 503 || err.status === 503 || err.message?.includes("503") || err.isTimeout) {
-      const e = new Error(
-        "Gemini API is currently overloaded. Please wait a moment and try again."
-      );
-      e.statusCode = 503;
-      throw e;
-    }
-
+    // Exhausted all retries — forward the real error, just ensure a statusCode is set
+    if (!err.statusCode) err.statusCode = err.status || 500;
     throw err;
   }
 
@@ -274,7 +377,7 @@ async function generateQuiz({ sourceText, questionType, difficulty, count, topic
     } catch {
       if (retryCount < 2) {
         console.warn(`[Quiz Gen] JSON parsing failed. Retrying...`);
-        return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
+        return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles, topicsWithCounts, chunks }, retryCount + 1);
       }
       const err = new Error("AI returned non-JSON output");
       err.statusCode = 502;
@@ -284,7 +387,7 @@ async function generateQuiz({ sourceText, questionType, difficulty, count, topic
     if (!parsed.questions || !Array.isArray(parsed.questions)) {
        if (retryCount < 2) {
          console.warn(`[Quiz Gen] Missing questions array. Retrying...`);
-         return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
+         return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles, topicsWithCounts, chunks }, retryCount + 1);
        }
        const err = new Error("AI returned invalid structure (missing questions array)");
        err.statusCode = 502;
@@ -338,6 +441,71 @@ async function generateQuiz({ sourceText, questionType, difficulty, count, topic
       }
       
       q.evidence = matchedEvidence;
+
+      // Grounding: verify and auto-correct the cited chunk
+      const evidenceText = q.evidence.trim();
+
+      // 1. Check if the LLM-cited chunk exists and contains the evidence
+      const citedChunk = chunks.find(c => c.chunkId === q.source?.chunkId);
+      if (citedChunk) {
+        const hasEvidence = fuzzyMatchEvidence(citedChunk.text, evidenceText);
+        if (hasEvidence) {
+          // Confirm source metadata from chunk
+          q.source.page = citedChunk.page;
+          q.source.section = citedChunk.section;
+          q.source.topic = citedChunk.section;
+          if (citedChunk.pdfName) q.source.pdfName = citedChunk.pdfName;
+          if (citedChunk.startLine) q.source.startLine = citedChunk.startLine;
+          if (citedChunk.endLine) q.source.endLine = citedChunk.endLine;
+        } else {
+          // 2. LLM cited wrong chunk — scan all chunks for real location
+          let corrected = false;
+          for (const c of chunks) {
+            if (fuzzyMatchEvidence(c.text, evidenceText)) {
+              q.source = {
+                page: c.page,
+                section: c.section,
+                chunkId: c.chunkId,
+                topic: c.section,
+                ...(c.pdfName ? { pdfName: c.pdfName } : {}),
+                ...(c.startLine ? { startLine: c.startLine } : {}),
+                ...(c.endLine   ? { endLine: c.endLine }   : {}),
+              };
+              corrected = true;
+              break;
+            }
+          }
+          // If not correctable, keep existing source (LLM-provided fallback)
+          if (!corrected && !q.source.topic) {
+            q.source.topic = q.source.section;
+          }
+        }
+      } else if (chunks.length > 0) {
+        // Cited chunk doesn't exist — scan all chunks
+        let corrected = false;
+        for (const c of chunks) {
+          if (fuzzyMatchEvidence(c.text, evidenceText)) {
+            q.source = {
+              page: c.page,
+              section: c.section,
+              chunkId: c.chunkId,
+              topic: c.section,
+              ...(c.pdfName ? { pdfName: c.pdfName } : {}),
+              ...(c.startLine ? { startLine: c.startLine } : {}),
+              ...(c.endLine   ? { endLine: c.endLine }   : {}),
+            };
+            corrected = true;
+            break;
+          }
+        }
+        if (!corrected && !q.source.topic) {
+          q.source.topic = q.source.section;
+        }
+      } else {
+        // No chunks available — copy section to topic
+        if (!q.source.topic) q.source.topic = q.source.section;
+      }
+
       seen.add(key);
       validQuestions.push(q);
     }
@@ -345,7 +513,7 @@ async function generateQuiz({ sourceText, questionType, difficulty, count, topic
     // If we don't have enough and haven't retried yet, try one more time
     if (validQuestions.length < n && retryCount < 2) {
       console.warn(`[Quiz Gen] Retry triggered. Only got ${validQuestions.length}/${n} valid questions.`);
-      return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles }, retryCount + 1);
+      return generateQuiz({ sourceText, questionType, difficulty, count, topicTitles, topicsWithCounts, chunks }, retryCount + 1);
     }
 
     // Ensure we have at least SOME questions
@@ -364,22 +532,30 @@ async function generateQuiz({ sourceText, questionType, difficulty, count, topic
       e.statusCode = 403;
       throw e;
     }
+
     // Pass through errors that already have a statusCode (our own typed errors)
     if (err.statusCode) throw err;
 
-    // 429 quota exceeded – also catch here if it slipped through
-    if (err.status === 429 || err.message?.includes("429") || err.message?.includes("quota")) {
-      const e = new Error(
-        "Gemini API quota exceeded. Your free-tier daily limit has been reached. " +
-        "Please try again tomorrow or enable billing at https://ai.google.dev."
-      );
+    // 429 slipped through inner catch — forward the real SDK message, do not replace it
+    if (err.status === 429) {
+      console.error(`[Quiz Gen] 429 reached outer catch`, {
+        message:      err.message,
+        status:       err.status,
+        errorDetails: err.errorDetails ?? null,
+      });
+      const e = new Error(err.message || "Gemini API returned 429 (rate limit / quota).");
       e.statusCode = 429;
       throw e;
     }
 
-    console.error(`[Quiz Gen Error]`, err);
+    console.error(`[Quiz Gen Error]`, {
+      message:      err.message,
+      status:       err.status,
+      errorDetails: err.errorDetails ?? null,
+      stack:        err.stack,
+    });
     const e = new Error(err.message || "An unexpected error occurred during quiz generation.");
-    e.statusCode = 500;
+    e.statusCode = err.status || 500;
     throw e;
   }
 }

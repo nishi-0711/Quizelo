@@ -1,152 +1,40 @@
 import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { api } from "../lib/api";
-
-// --- Sub-components ---
-
-const ProgressBar = ({ current, total }) => {
-  const percentage = ((current + 1) / total) * 100;
-  return (
-    <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2 mb-6 overflow-hidden">
-      <div 
-        className="bg-indigo-600 h-full transition-all duration-300 ease-out"
-        style={{ width: `${percentage}%` }}
-      />
-    </div>
-  );
-};
-
-const QuestionCard = ({ question, index, total, onAnswer, currentAnswer, reviewMode }) => {
-  return (
-    <Card className="p-8 border-slate-200 dark:border-slate-800 shadow-lg bg-white dark:bg-slate-900 mb-8 transition-all duration-300 transform">
-      <div className="flex items-center justify-between mb-8">
-        <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
-          Question {index + 1} of {total}
-        </div>
-        <div className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-500 uppercase tracking-tighter">
-          {question.type.replace('_', ' ')}
-        </div>
-      </div>
-
-      <h3 className="text-xl font-semibold text-slate-900 dark:text-white mb-8 leading-relaxed">
-        {question.question}
-      </h3>
-
-      <div className="space-y-3">
-        {question.type === 'mcq' && question.options.map((option, idx) => (
-          <button
-            key={idx}
-            onClick={() => onAnswer(idx)}
-            disabled={reviewMode}
-            className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
-              reviewMode && idx === question.answerIndex
-                ? "border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:border-emerald-500 dark:text-emerald-300"
-                : reviewMode && currentAnswer === idx && idx !== question.answerIndex
-                ? "border-rose-500 bg-rose-50 text-rose-800 dark:bg-rose-900/30 dark:border-rose-500 dark:text-rose-300"
-                : currentAnswer === idx
-                ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
-                : "border-slate-100 bg-slate-50 text-slate-700 hover:border-slate-200 dark:bg-slate-800/50 dark:border-slate-700 dark:text-slate-300"
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold ${
-                reviewMode && idx === question.answerIndex ? "border-emerald-500 bg-emerald-500 text-white" :
-                reviewMode && currentAnswer === idx && idx !== question.answerIndex ? "border-rose-500 bg-rose-500 text-white" :
-                currentAnswer === idx ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-300 text-slate-400"
-              }`}>
-                {String.fromCharCode(65 + idx)}
-              </span>
-              {option}
-            </div>
-          </button>
-        ))}
-
-        {question.type === 'true_false' && (
-          <div className="grid grid-cols-2 gap-4">
-            {[true, false].map((val) => (
-              <button
-                key={val.toString()}
-                onClick={() => onAnswer(val)}
-                disabled={reviewMode}
-                className={`p-6 rounded-xl border-2 font-bold transition-all ${
-                  reviewMode && val === question.answer
-                    ? "border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:border-emerald-500 dark:text-emerald-300"
-                    : reviewMode && currentAnswer === val && val !== question.answer
-                    ? "border-rose-500 bg-rose-50 text-rose-800 dark:bg-rose-900/30 dark:border-rose-500 dark:text-rose-300"
-                    : currentAnswer === val
-                    ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
-                    : "border-slate-100 bg-slate-50 text-slate-700 hover:border-slate-200 dark:bg-slate-800/50 dark:border-slate-700 dark:text-slate-300"
-                }`}
-              >
-                {val ? "True" : "False"}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {(question.type === 'fill_blank' || question.type === 'short_answer') && (
-          <div className="space-y-4">
-            <textarea
-              className={`w-full p-4 rounded-xl border-2 outline-none transition-all ${
-                reviewMode && String(currentAnswer).trim().toLowerCase() === String(question.answer).trim().toLowerCase()
-                  ? "border-emerald-500 bg-emerald-50 text-emerald-900 dark:bg-emerald-900/10 dark:text-emerald-100"
-                  : reviewMode && String(currentAnswer).trim().toLowerCase() !== String(question.answer).trim().toLowerCase()
-                  ? "border-rose-500 bg-rose-50 text-rose-900 dark:bg-rose-900/10 dark:text-rose-100"
-                  : "border-slate-200 bg-slate-50 focus:border-indigo-500 dark:bg-slate-800/50 dark:border-slate-700 dark:text-white"
-              }`}
-              placeholder="Type your answer here..."
-              rows={3}
-              value={currentAnswer || ""}
-              onChange={(e) => onAnswer(e.target.value)}
-              disabled={reviewMode}
-            />
-            {reviewMode && String(currentAnswer).trim().toLowerCase() !== String(question.answer).trim().toLowerCase() && (
-              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-300">
-                <span className="font-bold text-xs uppercase tracking-wider mb-1 block">Correct Answer:</span>
-                {question.answer}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {reviewMode && (
-        <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 space-y-4 animate-in slide-in-from-bottom-2">
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50">
-            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Explanation</h4>
-            <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{question.explanation}</p>
-          </div>
-          <div className="p-4 rounded-xl border border-indigo-100 bg-indigo-50/50 dark:border-indigo-900/30 dark:bg-indigo-900/10">
-            <h4 className="text-xs font-bold text-indigo-500 dark:text-indigo-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-              <span>📄</span> Source Evidence
-            </h4>
-            <p className="text-sm text-indigo-900 dark:text-indigo-200 italic">"{question.evidence}"</p>
-          </div>
-        </div>
-      )}
-    </Card>
-  );
-};
+import ExportModal from "../components/ExportModal";
+import { ProgressBar, QuestionCard } from "../components/QuestionCard";
+import QuizAnalysis, { DifficultyDashboard } from "../components/QuizAnalysis";
 
 // --- Main Home Component ---
 
 export default function Home() {
   const inputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
-  const [file, setFile] = useState(null);
+  const [files, setFiles] = useState([]);              // [{ id, name, status, error, text, topics, chunks, pdfUrl }]
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   
   const [extractedText, setExtractedText] = useState("");
-  const [topics, setTopics] = useState([]); // detected topic chunks
-  const [selectedTopicIds, setSelectedTopicIds] = useState(new Set()); // which topics are checked
+  const [topics, setTopics] = useState([]);            // detected topic chunks from all PDFs
+  const [chunks, setChunks] = useState([]);            // paragraph-level chunks from all PDFs
+  const [pdfModalOpen, setPdfModalOpen] = useState(false);
+  const [pdfModalQuestion, setPdfModalQuestion] = useState(null);
+  
+  const [selectedTopicIds, setSelectedTopicIds] = useState(new Set());
+  const [weightedMode, setWeightedMode] = useState(false);
+  const [topicWeights, setTopicWeights] = useState({});  // { topicId: 1-10 }
   const [quizQuestions, setQuizQuestions] = useState([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(-1); // -1: Config, >=0: Play
   const [userAnswers, setUserAnswers] = useState({});
   const [score, setScore] = useState(null);
   const [reviewMode, setReviewMode] = useState(false);
   const [sessionId, setSessionId] = useState(null);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const quizStartedAtRef = useRef(null);
+  const [quizDurationSec, setQuizDurationSec] = useState(null);
+  const docsRef = useRef([]);
 
   // Configuration state
   const [questionType, setQuestionType] = useState("mixed");
@@ -154,37 +42,150 @@ export default function Home() {
   const [count, setCount] = useState("5");
   const [customCount, setCustomCount] = useState("");
 
-  // Topic helpers
-  const showTopicSelector = topics.length > 1; // hide when only full-doc fallback
+  // ── Multi-document helpers ─────────────────────────────────────────────────
+  const readyDocs = files.filter((d) => d.text);
+  const pdfNames = readyDocs.map((d) => d.name);
+  const primaryName = files[0]?.name || "Document";
+
+  const syncFiles = () => setFiles([...docsRef.current]);
+
+  /** Rebuild combined source text / topics / chunks from the current documents. */
+  const rebuildFromDocs = (docs) => {
+    const text = docs.filter((d) => d.text).map((d) => d.text).join("\n\n");
+    const detected = docs.flatMap((d) => d.topics || []);
+    setExtractedText(text);
+    setTopics(detected);
+    setChunks(docs.flatMap((d) => d.chunks || []));
+    setSelectedTopicIds(new Set(detected.map((t) => t.id)));
+    const defaultWeights = {};
+    detected.forEach((t) => { defaultWeights[t.id] = 5; });
+    setTopicWeights(defaultWeights);
+    setWeightedMode(false);
+    // Documents changed — any generated quiz is stale
+    setQuizQuestions([]);
+    setCurrentQuestionIndex(-1);
+    setUserAnswers({});
+    setScore(null);
+    setReviewMode(false);
+    setSessionId(null);
+    quizStartedAtRef.current = null;
+    setQuizDurationSec(null);
+  };
+
+  const handleFiles = async (fileList) => {
+    const incoming = Array.from(fileList || []).filter(
+      (f) => f.type === "application/pdf" && !docsRef.current.some((d) => d.name === f.name)
+    );
+    if (incoming.length === 0) {
+      setError("Please add a valid PDF file (or it is already in the list).");
+      return;
+    }
+    setError("");
+
+    const newDocs = incoming.map((f) => ({
+      id: `${f.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: f.name,
+      raw: f,
+      status: "processing",
+      error: "",
+      text: "",
+      topics: [],
+      chunks: [],
+      pdfUrl: URL.createObjectURL(f),
+    }));
+
+    docsRef.current = [...docsRef.current, ...newDocs];
+    syncFiles();
+    setLoading(true);
+
+    // Process documents with limited concurrency (2 at a time) so large PDFs
+    // don't block the UI and multiple files are handled efficiently.
+    const queue = [...newDocs];
+    const worker = async () => {
+      while (queue.length > 0) {
+        const doc = queue.shift();
+        try {
+          const res = await api.extractPdfs([doc.raw]);
+          const d = res.documents?.[0];
+          const idx = docsRef.current.findIndex((x) => x.id === doc.id);
+          if (idx >= 0) {
+            docsRef.current[idx] = d?.text
+              ? { ...docsRef.current[idx], status: "ready", text: d.text, topics: d.topics || [], chunks: d.chunks || [] }
+              : { ...docsRef.current[idx], status: "error", error: "No extractable text found in this PDF." };
+          }
+        } catch (err) {
+          const idx = docsRef.current.findIndex((x) => x.id === doc.id);
+          if (idx >= 0) docsRef.current[idx] = { ...docsRef.current[idx], status: "error", error: err.message || "Failed to extract text from PDF." };
+        }
+        syncFiles();
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, newDocs.length) }, worker));
+    setLoading(false);
+    rebuildFromDocs(docsRef.current.filter((d) => d.text));
+  };
+
+  const removeDoc = (id) => {
+    const doc = docsRef.current.find((x) => x.id === id);
+    if (doc?.pdfUrl) URL.revokeObjectURL(doc.pdfUrl);
+    docsRef.current = docsRef.current.filter((x) => x.id !== id);
+    syncFiles();
+    rebuildFromDocs(docsRef.current.filter((d) => d.text));
+  };
+
+  const retryDoc = async (id) => {
+    const idx = docsRef.current.findIndex((x) => x.id === id);
+    if (idx < 0) return;
+    const doc = docsRef.current[idx];
+    if (!doc.raw) return;
+    docsRef.current[idx] = { ...doc, status: "processing", error: "" };
+    syncFiles();
+    setLoading(true);
+    try {
+      const res = await api.extractPdfs([doc.raw]);
+      const d = res.documents?.[0];
+      const i2 = docsRef.current.findIndex((x) => x.id === id);
+      if (i2 >= 0) {
+        docsRef.current[i2] = d?.text
+          ? { ...docsRef.current[i2], status: "ready", text: d.text, topics: d.topics || [], chunks: d.chunks || [] }
+          : { ...docsRef.current[i2], status: "error", error: "No extractable text found in this PDF." };
+      }
+    } catch (err) {
+      const i2 = docsRef.current.findIndex((x) => x.id === id);
+      if (i2 >= 0) docsRef.current[i2] = { ...docsRef.current[i2], status: "error", error: err.message || "Failed to extract text from PDF." };
+    }
+    syncFiles();
+    setLoading(false);
+    rebuildFromDocs(docsRef.current.filter((d) => d.text));
+  };
+
+  // ── Topic helpers ──────────────────────────────────────────────────────────
+  const showTopicSelector = topics.length > 1;
   const selectedTopics = topics.filter((t) => selectedTopicIds.has(t.id));
   const selectedCharCount = selectedTopics.reduce((s, t) => s + t.content.length, 0);
+  const totalWeight = selectedTopics.reduce((s, t) => s + (topicWeights[t.id] || 5), 0);
+  const getTopicPercent = (id) => {
+    const w = topicWeights[id] || 5;
+    return totalWeight > 0 ? Math.round((w / totalWeight) * 100) : 0;
+  };
 
-  const handleFileChange = async (f) => {
-    if (f && f.type === "application/pdf") {
-      setFile(f);
-      setError("");
-      setLoading(true);
-      try {
-        const res = await api.extractPdf(f);
-        if (res.text) {
-          setExtractedText(res.text);
-          const detected = res.topics && res.topics.length > 0 ? res.topics : [];
-          setTopics(detected);
-          // Auto-select all topics
-          setSelectedTopicIds(new Set(detected.map((t) => t.id)));
-        } else {
-          setError("No extractable text found in this PDF.");
-          setFile(null);
-        }
-      } catch (err) {
-        setError(err.message || "Failed to extract text from PDF.");
-        setFile(null);
-      } finally {
-        setLoading(false);
-      }
-    } else {
-      setError("Please upload a valid PDF file.");
-    }
+  /** Largest-Remainder Method: distribute totalCount across selectedTopics by weight */
+  const distributeByLRM = (total) => {
+    if (selectedTopics.length === 0) return {};
+    const tw = selectedTopics.reduce((s, t) => s + (topicWeights[t.id] || 5), 0);
+    const quotas = selectedTopics.map((t) => ({
+      id: t.id,
+      quota: total * ((topicWeights[t.id] || 5) / tw),
+    }));
+    const floors = quotas.map((q) => ({ ...q, fl: Math.floor(q.quota), rem: q.quota - Math.floor(q.quota) }));
+    const remaining = total - floors.reduce((s, f) => s + f.fl, 0);
+    const sorted = [...floors].sort((a, b) => b.rem - a.rem);
+    const counts = {};
+    floors.forEach((f) => { counts[f.id] = f.fl; });
+    sorted.slice(0, remaining).forEach((f) => { counts[f.id]++; });
+    // ensure every topic gets at least 1
+    floors.forEach((f) => { if (counts[f.id] < 1) counts[f.id] = 1; });
+    return counts;
   };
 
   const toggleTopic = (id) => {
@@ -195,13 +196,12 @@ export default function Home() {
       return next;
     });
   };
-
   const selectAllTopics = () => setSelectedTopicIds(new Set(topics.map((t) => t.id)));
-  const clearAllTopics = () => setSelectedTopicIds(new Set());
+  const clearAllTopics  = () => setSelectedTopicIds(new Set());
 
   const handleGenerate = async () => {
     if (!extractedText) return;
-    
+
     setLoading(true);
     setError("");
     try {
@@ -212,9 +212,21 @@ export default function Home() {
         return;
       }
 
-      // If topics are available and user has selected specific ones, send them.
-      // Otherwise fall back to full text.
-      const topicsPayload = showTopicSelector && selectedTopics.length > 0 ? selectedTopics : null;
+      // Build the selectedTopics payload, optionally with weighted counts
+      let topicsPayload = null;
+      if (showTopicSelector && selectedTopics.length > 0) {
+        if (weightedMode && selectedTopics.length > 1) {
+          const countMap = distributeByLRM(finalCount);
+          topicsPayload = selectedTopics.map((t) => ({
+            id: t.id,
+            title: t.title,
+            content: t.content,
+            targetCount: countMap[t.id] ?? 1,
+          }));
+        } else {
+          topicsPayload = selectedTopics.map((t) => ({ id: t.id, title: t.title, content: t.content }));
+        }
+      }
 
       const res = await api.generateQuiz({
         sourceText: extractedText,
@@ -222,6 +234,7 @@ export default function Home() {
         difficulty,
         count: finalCount,
         ...(topicsPayload ? { selectedTopics: topicsPayload } : {}),
+        chunks,
       });
       
       if (res.questions && res.questions.length > 0) {
@@ -230,9 +243,18 @@ export default function Home() {
         setUserAnswers({});
         setScore(null);
         setReviewMode(false);
+        quizStartedAtRef.current = Date.now();
+        setQuizDurationSec(null);
         try {
           // Create session with high lives to prevent auto-termination for long quizzes
-          const sessionRes = await api.createSession({ questions: res.questions, timeLimitSec: 3600, lives: 100 });
+          const sessionRes = await api.createSession({
+            questions: res.questions,
+            timeLimitSec: 3600,
+            lives: 100,
+            title: `Quiz — ${primaryName.replace(/\.pdf$/i, "") || "Document"}${files.length > 1 ? ` +${files.length - 1} more` : ""}`,
+            sourcePdfs: pdfNames,
+            difficulty,
+          });
           setSessionId(sessionRes.session.id);
         } catch (e) {
           console.error("Failed to create session on backend:", e);
@@ -280,6 +302,10 @@ export default function Home() {
         return;
       }
       
+      if (quizStartedAtRef.current) {
+        setQuizDurationSec(Math.max(0, Math.round((Date.now() - quizStartedAtRef.current) / 1000)));
+      }
+
       if (sessionId) {
         setLoading(true); // Optional: if you want a loading state while submitting
         try {
@@ -299,10 +325,15 @@ export default function Home() {
   };
 
   const resetQuiz = () => {
-    setFile(null);
+    docsRef.current.forEach((d) => { if (d.pdfUrl) URL.revokeObjectURL(d.pdfUrl); });
+    docsRef.current = [];
+    setFiles([]);
     setExtractedText("");
     setTopics([]);
+    setChunks([]);
     setSelectedTopicIds(new Set());
+    setWeightedMode(false);
+    setTopicWeights({});
     setQuizQuestions([]);
     setCurrentQuestionIndex(-1);
     setUserAnswers({});
@@ -310,6 +341,28 @@ export default function Home() {
     setError("");
     setReviewMode(false);
     setSessionId(null);
+    quizStartedAtRef.current = null;
+    setQuizDurationSec(null);
+    setPdfModalOpen(false);
+    setPdfModalQuestion(null);
+  };
+
+  const handleRetryWeakTopics = (weakTopics) => {
+    // Auto-select weak topic IDs (by matching topic title to detected topics)
+    const weakTitles = new Set(weakTopics.map(t => t.topic));
+    const matchedIds = topics
+      .filter(t => weakTitles.has(t.title))
+      .map(t => t.id);
+    setSelectedTopicIds(new Set(matchedIds.length > 0 ? matchedIds : topics.map(t => t.id)));
+    setScore(null);
+    setUserAnswers({});
+    setQuizQuestions([]);
+    setCurrentQuestionIndex(-1);
+    setReviewMode(false);
+    quizStartedAtRef.current = null;
+    setQuizDurationSec(null);
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const startReview = () => {
@@ -320,8 +373,8 @@ export default function Home() {
 
   if (score !== null) {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-12 text-center animate-in fade-in duration-700">
-        <Card className="p-10 border-slate-200 dark:border-slate-800 shadow-xl bg-white dark:bg-slate-900">
+      <div className="mx-auto max-w-2xl px-4 py-12 animate-in fade-in duration-700">
+        <Card className="p-10 border-slate-200 dark:border-slate-800 shadow-xl bg-white dark:bg-slate-900 text-center">
           <div className="text-6xl mb-6">🏆</div>
           <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">Quiz Results</h2>
           <p className="text-slate-600 dark:text-slate-400 mb-8">You've completed the quiz based on your document.</p>
@@ -334,8 +387,30 @@ export default function Home() {
           <div className="space-y-4">
             <Button size="lg" className="w-full" onClick={resetQuiz}>Start New Session</Button>
             <Button variant="ghost" className="w-full" onClick={startReview}>Review Your Answers</Button>
+            <button
+              id="export-quiz-btn-score"
+              onClick={() => setExportModalOpen(true)}
+              className="w-full py-3 rounded-xl border-2 border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/60 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-sm font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all flex items-center justify-center gap-2"
+            >
+              <span>⬇️</span> Export Quiz
+            </button>
           </div>
         </Card>
+
+        <QuizAnalysis
+          questions={quizQuestions}
+          userAnswers={userAnswers}
+          durationSec={quizDurationSec}
+          onRetryWeakTopics={handleRetryWeakTopics}
+        />
+
+        {exportModalOpen && (
+          <ExportModal
+            questions={quizQuestions}
+            pdfName={primaryName}
+            onClose={() => setExportModalOpen(false)}
+          />
+        )}
       </div>
     );
   }
@@ -347,9 +422,21 @@ export default function Home() {
           <div className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
             {reviewMode ? "Reviewing Answers" : "Quiz in progress"}
           </div>
-          <Button variant="ghost" size="sm" className="text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30" onClick={reviewMode ? () => { setScore(calculateScore()); setReviewMode(false); setCurrentQuestionIndex(-1); } : resetQuiz}>
-            {reviewMode ? "Back to Results" : "End Quiz"}
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Export button in toolbar */}
+            <button
+              id="export-quiz-btn-toolbar"
+              onClick={() => setExportModalOpen(true)}
+              title="Export Quiz"
+              className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 dark:hover:bg-indigo-950/30 dark:hover:border-indigo-800 dark:hover:text-indigo-400 text-xs font-bold transition-all flex items-center gap-1.5"
+            >
+              <span>⬇️</span>
+              <span className="hidden sm:inline">Export</span>
+            </button>
+            <Button variant="ghost" size="sm" className="text-xs text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30" onClick={reviewMode ? () => { setScore(calculateScore()); setReviewMode(false); setCurrentQuestionIndex(-1); } : resetQuiz}>
+              {reviewMode ? "Back to Results" : "End Quiz"}
+            </Button>
+          </div>
         </div>
         
         <ProgressBar current={currentQuestionIndex} total={quizQuestions.length} />
@@ -361,6 +448,10 @@ export default function Home() {
           onAnswer={handleAnswerSubmit}
           currentAnswer={userAnswers[currentQuestionIndex]}
           reviewMode={reviewMode}
+          onViewSource={(question) => {
+            setPdfModalQuestion(question);
+            setPdfModalOpen(true);
+          }}
         />
 
         <div className="flex justify-between items-center px-1">
@@ -381,6 +472,105 @@ export default function Home() {
             {currentQuestionIndex === quizQuestions.length - 1 ? (reviewMode ? "Finish Review" : "Submit Quiz") : "Next Question →"}
           </Button>
         </div>
+
+        {/* PDF Viewer Modal */}
+        {pdfModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-10 animate-in fade-in duration-200">
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setPdfModalOpen(false)} />
+            
+            <div className="relative w-full max-w-5xl h-[85vh] rounded-2xl bg-white dark:bg-slate-900 shadow-2xl flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200">
+              <div className="flex items-start justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex-shrink-0">
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">PDF Source Viewer</h3>
+                  {(() => {
+                    const viewerName = pdfModalQuestion?.source?.pdfName || files[0]?.name;
+                    return viewerName ? (
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5 truncate" title={viewerName}>{viewerName}</p>
+                    ) : null;
+                  })()}
+                </div>
+                <button
+                  onClick={() => setPdfModalOpen(false)}
+                  className="ml-4 h-8 w-8 flex-shrink-0 rounded-full flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition-colors text-lg"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {pdfModalQuestion?.source && (
+                <div className="px-6 py-4 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-800 flex-shrink-0">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Topic</p>
+                      <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 leading-snug">
+                        {pdfModalQuestion.source.topic || pdfModalQuestion.source.section}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Page</p>
+                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                        {pdfModalQuestion.source.page}
+                      </p>
+                    </div>
+                    {(pdfModalQuestion.source.startLine && pdfModalQuestion.source.endLine) && (
+                      <div>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Lines</p>
+                        <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                          {pdfModalQuestion.source.startLine}–{pdfModalQuestion.source.endLine}
+                        </p>
+                      </div>
+                    )}
+                    {pdfModalQuestion.evidence && (
+                      <div className="col-span-2 sm:col-span-4">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Highlighted Text</p>
+                        <p className="text-xs text-slate-700 dark:text-indigo-200 italic leading-relaxed bg-indigo-50 dark:bg-indigo-950/30 rounded-lg px-3 py-2 border border-indigo-100 dark:border-indigo-900/40">
+                          "{pdfModalQuestion.evidence}"
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex-1 bg-slate-50 dark:bg-slate-950 p-4 flex items-center justify-center min-h-0">
+                {(() => {
+                  const srcName = pdfModalQuestion?.source?.pdfName;
+                  const viewerUrl = srcName ? files.find((d) => d.name === srcName)?.pdfUrl : files[0]?.pdfUrl;
+                  return viewerUrl ? (
+                    <iframe
+                      key={`${viewerUrl}-page-${pdfModalQuestion?.source?.page ?? 1}`}
+                      src={`${viewerUrl}#page=${pdfModalQuestion?.source?.page ?? 1}`}
+                      className="w-full h-full rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm bg-white dark:bg-slate-900"
+                      title="PDF Source File"
+                    />
+                  ) : (
+                    <div className="flex flex-col items-center gap-3 text-slate-400">
+                      <span className="text-4xl">📄</span>
+                      <p className="text-sm font-medium">PDF preview unavailable — the document reference was cleared.</p>
+                      <p className="text-xs text-slate-400">Upload the PDF again to re-enable source viewing.</p>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex justify-end flex-shrink-0">
+                <Button onClick={() => setPdfModalOpen(false)}>Close Viewer</Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Export Modal */}
+        {exportModalOpen && (
+          <ExportModal
+            questions={quizQuestions}
+            pdfName={primaryName}
+            onClose={() => setExportModalOpen(false)}
+          />
+        )}
+
+        {/* Dashboard (collapsible) */}
+        <DifficultyDashboard questions={quizQuestions} />
       </div>
     );
   }
@@ -404,21 +594,24 @@ export default function Home() {
 
       <div className="space-y-8">
         {/* PDF Upload Section */}
-        <Card className="p-8 border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden group">
+        <Card className="p-8 border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden group" id="upload-card">
           {loading && !extractedText && (
             <div className="absolute inset-0 bg-white/80 dark:bg-slate-950/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center transition-all">
               <div className="h-12 w-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-              <p className="text-sm font-bold text-indigo-600 dark:text-indigo-400">Processing document...</p>
+              <p className="text-sm font-bold text-indigo-600 dark:text-indigo-400">Processing documents...</p>
             </div>
           )}
           
           <div className="flex items-center gap-3 mb-6">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-bold">1</div>
             <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">Upload Source</h2>
+            {files.length > 0 && (
+              <span className="ml-auto text-[11px] text-slate-400 font-medium">{files.length} document{files.length > 1 ? "s" : ""}</span>
+            )}
           </div>
 
           <div
-            className={`flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition-all ${
+            className={`flex min-h-[150px] cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed p-6 text-center transition-all ${
               dragOver
                 ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/30"
                 : "border-slate-200 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:hover:border-slate-800/50"
@@ -426,47 +619,131 @@ export default function Home() {
             onClick={() => inputRef.current?.click()}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFileChange(e.dataTransfer.files?.[0]); }}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
           >
             <div className="mb-4 text-4xl group-hover:scale-110 transition-transform">📄</div>
             <div className="text-sm font-bold text-slate-700 dark:text-slate-200">
-              {file ? "Document Ready" : "Select PDF Document"}
+              {files.length > 0 ? "Add More Documents" : "Select PDF Documents"}
             </div>
             <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              {file ? "Click to change document" : "Drag and drop or click to browse"}
+              {files.length > 0 ? "Click to add more" : "Drag and drop or click to browse"}
             </div>
-            
-            {file && (
-              <div className="mt-5 rounded-xl bg-indigo-600 px-4 py-2 text-[10px] font-black text-white uppercase tracking-widest shadow-lg shadow-indigo-200 dark:shadow-none">
-                {file.name}
-              </div>
-            )}
+            <div className="mt-1 text-[10px] text-slate-400">You can select multiple PDFs at once</div>
           </div>
-          <input ref={inputRef} type="file" accept="application/pdf" className="hidden" onChange={(e) => handleFileChange(e.target.files?.[0])} />
+          <input ref={inputRef} type="file" accept="application/pdf" multiple className="hidden" onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }} />
+
+          {/* Uploaded document list — each keeps its identity, removable before generation */}
+          {files.length > 0 && (
+            <div className="mt-5 space-y-2">
+              {files.map((doc) => (
+                <div
+                  key={doc.id}
+                  className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border transition-all ${
+                    doc.status === "error"
+                      ? "border-rose-200 dark:border-rose-900 bg-rose-50/60 dark:bg-rose-950/20"
+                      : doc.status === "ready"
+                        ? "border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40"
+                        : "border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20"
+                  }`}
+                >
+                  <div className="min-w-0 flex items-center gap-2.5">
+                    <span className="text-base flex-shrink-0">📄</span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{doc.name}</p>
+                      {doc.status === "processing" && (
+                        <p className="text-[10px] text-slate-400 font-medium">Extracting text…</p>
+                      )}
+                      {doc.status === "ready" && (
+                        <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">✓ Ready ({doc.topics.length} topics)</p>
+                      )}
+                      {doc.status === "error" && (
+                        <p className="text-[10px] text-rose-500 font-medium">⚠ {doc.error}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {doc.status === "error" && (
+                      <button
+                        onClick={() => retryDoc(doc.id)}
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 transition-all"
+                      >
+                        Retry
+                      </button>
+                    )}
+                    <button
+                      onClick={() => removeDoc(doc.id)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-500 dark:hover:bg-rose-950/30 transition-all"
+                      title={`Remove ${doc.name}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Study Notes button — visible once a document is processed */}
+          {extractedText && (
+            <div className="mt-5 pt-5 border-t border-slate-100 dark:border-slate-800">
+              <Link
+                to="/study-notes"
+                className="w-full flex items-center justify-center gap-2.5 py-3 rounded-xl bg-gradient-to-r from-violet-50 to-indigo-50 dark:from-violet-950/30 dark:to-indigo-950/30 border-2 border-violet-200 dark:border-violet-900/50 text-violet-700 dark:text-violet-400 text-sm font-bold hover:from-violet-100 hover:to-indigo-100 dark:hover:from-violet-950/50 dark:hover:to-indigo-950/50 transition-all hover:border-violet-300 dark:hover:border-violet-800"
+              >
+                <span className="text-base">📚</span>
+                Generate Study Notes
+              </Link>
+            </div>
+          )}
         </Card>
 
-        {/* Topic Selector Section — only shown when multiple topics detected */}
+        {/* ── Topic Selector ─────────────────────────────────────────── */}
         {showTopicSelector && (
-          <Card className="p-8 border-slate-200 dark:border-slate-800 shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-bold">2</div>
-              <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">Select Topics</h2>
+          <Card className="p-8 border-slate-200 dark:border-slate-800 shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500" id="topic-selector-card">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-bold">2</div>
+                <h2 className="text-lg font-bold text-slate-800 dark:text-slate-200">Select Topics</h2>
+              </div>
+              {/* Weighted mode toggle */}
+              <label className="flex items-center gap-2.5 cursor-pointer select-none" title="Distribute questions proportionally by topic weight">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Weighted</span>
+                <button
+                  id="weighted-toggle"
+                  role="switch"
+                  aria-checked={weightedMode}
+                  onClick={() => setWeightedMode((w) => !w)}
+                  className={`relative w-10 h-[22px] rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                    weightedMode ? "bg-indigo-600" : "bg-slate-200 dark:bg-slate-700"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-[3px] left-[3px] w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                      weightedMode ? "translate-x-[18px]" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </label>
             </div>
 
-            <div className="flex gap-2 mb-4">
+            {/* Bulk action bar */}
+            <div className="flex gap-2 mb-4 items-center">
               <button
+                id="select-all-topics"
                 onClick={selectAllTopics}
                 className="px-3 py-1.5 text-[11px] font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
               >
                 Select All
               </button>
               <button
+                id="clear-all-topics"
                 onClick={clearAllTopics}
                 className="px-3 py-1.5 text-[11px] font-bold rounded-lg border-2 border-slate-200 dark:border-slate-700 text-slate-500 hover:border-slate-300 dark:hover:border-slate-600 transition-colors"
               >
                 Clear
               </button>
-              <span className="ml-auto text-[11px] text-slate-400 font-medium self-center">
+              <span className="ml-auto text-[11px] text-slate-400 font-medium">
                 {selectedTopicIds.size} of {topics.length} selected
                 {selectedCharCount > 0 && (
                   <span className="ml-1 text-slate-300">· ~{Math.round(selectedCharCount / 5)} words</span>
@@ -474,44 +751,85 @@ export default function Home() {
               </span>
             </div>
 
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            {/* Topic list */}
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
               {topics.map((topic) => {
                 const checked = selectedTopicIds.has(topic.id);
+                const weight  = topicWeights[topic.id] || 5;
+                const percent = weightedMode && checked && selectedTopics.length > 0
+                  ? getTopicPercent(topic.id)
+                  : null;
+
                 return (
-                  <label
+                  <div
                     key={topic.id}
-                    className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                    className={`rounded-xl border-2 overflow-hidden transition-all ${
                       checked
                         ? "border-indigo-500 bg-indigo-50/60 dark:bg-indigo-900/20 dark:border-indigo-600"
                         : "border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700"
                     }`}
                   >
-                    <div className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
-                      checked ? "bg-indigo-600 border-indigo-600" : "border-slate-300 dark:border-slate-600"
-                    }`}>
-                      {checked && (
-                        <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 10">
-                          <path d="M1.5 5l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
+                    <label className="flex items-start gap-3 p-3 cursor-pointer">
+                      {/* Custom checkbox */}
+                      <div
+                        className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                          checked ? "bg-indigo-600 border-indigo-600" : "border-slate-300 dark:border-slate-600"
+                        }`}
+                      >
+                        {checked && (
+                          <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 10">
+                            <path d="M1.5 5l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                      </div>
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={checked}
+                        onChange={() => toggleTopic(topic.id)}
+                      />
+
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-semibold truncate ${
+                          checked ? "text-indigo-700 dark:text-indigo-300" : "text-slate-700 dark:text-slate-300"
+                        }`}>
+                          {topic.title}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {topic.pdfName && <span className="font-semibold text-slate-500 dark:text-slate-400 truncate max-w-[200px] inline-block align-bottom">{topic.pdfName.replace(/\.pdf$/i, "")} · </span>}
+                          ~{Math.round(topic.content.length / 5)} words
+                          {topic.pageStart && topic.pageEnd && (
+                            <span className="ml-1.5">· Pages {topic.pageStart}–{topic.pageEnd}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {percent !== null && (
+                        <span className="flex-shrink-0 tabular-nums text-[13px] font-black text-indigo-600 dark:text-indigo-400 self-center">
+                          {percent}%
+                        </span>
                       )}
-                    </div>
-                    <input
-                      type="checkbox"
-                      className="sr-only"
-                      checked={checked}
-                      onChange={() => toggleTopic(topic.id)}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-semibold truncate ${
-                        checked ? "text-indigo-700 dark:text-indigo-300" : "text-slate-700 dark:text-slate-300"
-                      }`}>
-                        {topic.title}
+                    </label>
+
+                    {/* Weight slider — visible only in weighted mode for checked topics */}
+                    {weightedMode && checked && (
+                      <div className="px-4 pb-3 pt-0">
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] font-bold text-slate-400 w-5 text-right tabular-nums">{weight}</span>
+                          <input
+                            type="range"
+                            min="1"
+                            max="10"
+                            value={weight}
+                            onChange={(e) =>
+                              setTopicWeights((prev) => ({ ...prev, [topic.id]: parseInt(e.target.value) }))
+                            }
+                            className="flex-1 h-1.5 rounded-full accent-indigo-600 cursor-pointer"
+                          />
+                        </div>
                       </div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">
-                        ~{Math.round(topic.content.length / 5)} words
-                      </div>
-                    </div>
-                  </label>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -519,11 +837,20 @@ export default function Home() {
             {selectedTopicIds.size === 0 && (
               <p className="mt-3 text-xs text-amber-600 dark:text-amber-400 font-medium">⚠️ Select at least one topic to generate questions.</p>
             )}
+
+            {weightedMode && selectedTopics.length > 1 && (
+              <div className="mt-4 p-3 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-900/40">
+                <p className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                  💡 Questions will be distributed across topics based on the sliders above.
+                </p>
+              </div>
+            )}
           </Card>
         )}
 
+        {/* ── Quiz Options ───────────────────────────────────────────── */}
         {/* Quiz Options Section */}
-        <Card className="p-8 border-slate-200 dark:border-slate-800 shadow-sm">
+        <Card className="p-8 border-slate-200 dark:border-slate-800 shadow-sm" id="quiz-options-card">
           <div className="flex items-center gap-3 mb-8">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-bold">
               {showTopicSelector ? "3" : "2"}
@@ -601,6 +928,7 @@ export default function Home() {
         {/* Generate Button Section */}
         <div className="flex flex-col items-center pt-6">
           <Button
+            id="generate-quiz-btn"
             size="lg"
             className="w-full max-w-sm py-5 text-sm font-black uppercase tracking-[0.2em] shadow-xl shadow-indigo-200 dark:shadow-none hover:translate-y-[-2px] transition-all disabled:opacity-50"
             disabled={!extractedText || loading || (showTopicSelector && selectedTopicIds.size === 0)}
@@ -608,7 +936,7 @@ export default function Home() {
           >
             {loading ? "Generating..." : "Generate Quiz"}
           </Button>
-          {!file && !loading && (
+          {files.length === 0 && !loading && (
             <p className="mt-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               Please upload a document first
             </p>
