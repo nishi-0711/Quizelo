@@ -8,6 +8,9 @@ const quizRoutes = require("./quiz.routes");
 const gameplayRoutes = require("./gameplay.routes");
 const profileRoutes = require("./profile.routes");
 const historyRoutes = require("./history.routes");
+const exportRoutes = require("./export.routes");
+const notesRoutes = require("./notes.routes");
+const flashcardsRoutes = require("./flashcards.routes");
 
 const router = express.Router();
 
@@ -23,6 +26,9 @@ router.use("/quiz", quizRoutes);
 router.use("/gameplay", gameplayRoutes);
 router.use("/profile", profileRoutes);
 router.use("/history", historyRoutes);
+router.use("/export", exportRoutes);
+router.use("/notes", notesRoutes);
+router.use("/flashcards", flashcardsRoutes);
 
 module.exports = router;
 
